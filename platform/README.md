@@ -67,7 +67,7 @@ Getting this wrong is the classic Kafka-in-Docker bug: the first connection work
 
 ### Security and resource limits
 
-- Every port is bound to `127.0.0.1`, so the databases are not reachable from other machines on the same Wi-Fi.
+- Every port is bound to `127.0.0.1`, so the databases are not reachable from other machines on the same Wi-Fi. A plain `"5432:5432"` would bind `0.0.0.0` (every network interface). A host firewall such as ufw would not help: Docker writes its own iptables rules for published ports, and that traffic never reaches ufw's rules.
 - Every container has `mem_limit`. The laptop has 7.4 GB of RAM, and a runaway container should be killed rather than freeze the machine.
 - Passwords are random, generated into `.env`, which git ignores. `.env.example` documents the variables without secrets.
 - Image versions are pinned (`postgres:18.6-alpine`, not `postgres:latest`), so the stack is the same next month and on another machine.

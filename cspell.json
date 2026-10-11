@@ -5,6 +5,8 @@
   "words": [
     "addopts",
     "Alembic",
+    "allkeys",
+    "iptables",
     "appendonly",
     "gitkeep",
     "healthcheck",
