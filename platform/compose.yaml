@@ -1,0 +1,80 @@
+# Local infrastructure for RideMesh. Start it with `make up`, which passes .env and selects
+# the native Docker Engine. Every port is bound to 127.0.0.1: nothing is reachable from the network.
+name: ridemesh
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes:
+      # Postgres 18 images keep data in /var/lib/postgresql/18/docker, so the volume mounts the parent.
+      - pgdata:/var/lib/postgresql
+      # Scripts here run once, only when the data volume is empty.
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    mem_limit: 512m
+    healthcheck:
+      # Checks over TCP: during first-start init Postgres listens on its socket only,
+      # so this stays unhealthy until the init scripts have finished.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7.4.11-alpine
+    # noeviction: when memory is full, writes fail loudly instead of Redis silently deleting keys.
+    # Dispatch keeps driver locks here, and an evicted lock means a double-matched driver.
+    # No persistence: positions and locks are short-lived; durable state lives in Postgres.
+    command: >
+      redis-server
+      --maxmemory 200mb
+      --maxmemory-policy noeviction
+      --save ""
+      --appendonly no
+    ports:
+      - "127.0.0.1:${REDIS_PORT}:6379"
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redpanda:
+    image: redpandadata/redpanda:v26.2.4
+    # Two Kafka listeners: other containers connect to redpanda:9092, programs on the laptop to
+    # localhost:${KAFKA_PORT}. Each listener advertises the address its own clients can reach.
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:${KAFKA_PORT}
+      - --schema-registry-addr=internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr=redpanda:33145
+      - --advertise-rpc-addr=redpanda:33145
+    ports:
+      - "127.0.0.1:${KAFKA_PORT}:19092"
+      - "127.0.0.1:${SCHEMA_REGISTRY_PORT}:18081"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+volumes:
+  pgdata:
+  redpanda-data:

@@ -5,10 +5,18 @@
   "words": [
     "addopts",
     "Alembic",
+    "appendonly",
     "gitkeep",
+    "healthcheck",
+    "healthchecks",
+    "initdb",
     "kodurisaivishnu",
+    "maxmemory",
     "mypy",
+    "noeviction",
     "OSRM",
+    "pandaproxy",
+    "pgdata",
     "pycodestyle",
     "pyflakes",
     "pygrep",
@@ -17,6 +25,10 @@
     "pyupgrade",
     "Redpanda",
     "ridemesh",
+    "rpk",
+    "smp",
+    "urandom",
+    "uuidv",
     "venv"
   ]
 }
