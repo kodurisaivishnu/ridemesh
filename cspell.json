@@ -1,0 +1,22 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [".venv", "uv.lock", ".git"],
+  "words": [
+    "addopts",
+    "Alembic",
+    "gitkeep",
+    "kodurisaivishnu",
+    "mypy",
+    "OSRM",
+    "pycodestyle",
+    "pyflakes",
+    "pygrep",
+    "pyproject",
+    "pytest",
+    "pyupgrade",
+    "Redpanda",
+    "ridemesh",
+    "venv"
+  ]
+}
