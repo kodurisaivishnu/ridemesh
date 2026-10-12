@@ -1,15 +1,18 @@
 # Local platform
 
-Postgres, Redis and Redpanda for local development, run with Docker Compose.
+Postgres, Redis and Redpanda for local development, plus an optional observability stack (Grafana with Prometheus, Loki and Tempo), run with Docker Compose.
 
 ```bash
-make up      # start everything, wait until healthy (creates .env on first run)
-make ps      # status and health
+make up          # start Postgres, Redis, Redpanda; wait until healthy (creates .env on first run)
+make obs-up      # also start observability; Grafana on http://localhost:3000
+make otel-smoke  # send a test trace, metric and log line; fails if Grafana can't find them
+make ps          # status and health
 make psql db=trips
 make rpk args="topic list"
-make stats   # memory per container
-make down    # stop, keep data
-make nuke    # stop and delete all data
+make stats       # memory per container
+make obs-down    # stop observability only, keep its data
+make down        # stop everything, keep data
+make nuke        # stop everything and delete all data
 ```
 
 | Service | Image | From the laptop | From other containers |
@@ -18,6 +21,8 @@ make nuke    # stop and delete all data
 | Redis | `redis:7.4.11-alpine` | `127.0.0.1:6379` | `redis:6379` |
 | Redpanda (Kafka API) | `redpandadata/redpanda:v26.2.4` | `localhost:19092` | `redpanda:9092` |
 | Schema Registry | built into Redpanda | `localhost:18081` | `redpanda:8081` |
+| Grafana | `grafana/otel-lgtm:0.34.0` | `http://localhost:3000` | `lgtm:3000` |
+| OTLP (gRPC / HTTP) | same container | `localhost:4317` / `localhost:4318` | `lgtm:4317` / `lgtm:4318` |
 
 ## Design decisions and why
 
@@ -79,3 +84,47 @@ On Linux, Docker Desktop runs containers inside a virtual machine that reserves 
 ### Postgres 18 data path
 
 The Postgres 18 image stores data in `/var/lib/postgresql/18/docker`, not `/var/lib/postgresql/data` as earlier versions did. The volume is mounted at `/var/lib/postgresql`, which also leaves room for an in-place `pg_upgrade` to a later major version.
+
+## Observability
+
+Decision and alternatives: [ADR-0002](../docs/adr/0002-observability-stack.md).
+
+### One container for all of it
+
+`grafana/otel-lgtm` runs six programs in one container. A service only needs to know one address, the OTLP endpoint; the collector sends each signal where it belongs:
+
+```
+service --OTLP--> collector (4317 gRPC, 4318 HTTP)
+                    |- traces  -> Tempo
+                    |- metrics -> Prometheus
+                    |- logs    -> Loki
+                                   \- Grafana reads all three (port 3000)
+```
+
+Pyroscope (continuous profiling) also runs, because the image's startup script has no switch to turn it off. It uses about 40–70 MiB.
+
+The image is made for development: no high availability, no retention tuning, and every part shares one memory limit. Phase 5 replaces it with the separate tools.
+
+### Started only when needed
+
+The service has the Compose profile `observability`, so `make up` does not start it. It is the biggest container in the stack, and most days only need it while a service is being traced. The Makefile passes the profile to `down`, `ps`, `logs`, `stats` and `nuke`, so those still cover it.
+
+### Grafana plugins turned off to save memory
+
+Grafana starts most data-source plugins as separate processes. Out of the box the container idled at **893 MiB**, about 180 MiB of it plugins this project never uses: MySQL, MSSQL, InfluxDB, OpenTSDB, Elasticsearch, Jaeger, Zipkin, Google Cloud Monitoring and an AI plugin. `GF_PLUGINS_DISABLE_PLUGINS` stops them. After that it idles at **300–580 MiB** in `docker stats`, of which ~330 MiB is process memory and the rest is file cache. The number moves with how much the laptop is swapping.
+
+Grafana usage reports, update checks and plugin auto-updates are off, so nothing phones home and plugins don't change version on their own.
+
+### Grafana has no login
+
+The image lets anyone in as Admin without a password. That is acceptable only because the port is bound to `127.0.0.1`. Never publish port 3000 on `0.0.0.0`.
+
+### The smoke test checks, not just sends
+
+`make otel-smoke` ([otel_smoke.py](otel_smoke.py)) sends one span, one counter and one log line, then queries Tempo, Prometheus and Loki through Grafana until each one appears. It exits 1 if any is missing. A made-up trace id returns 404 and an unknown run id finds no logs, so the checks can fail. Three things it shows that every service will need:
+
+- **Flush before exit.** The SDK batches telemetry. Without `shutdown()`, a short script exits before anything is sent.
+- **Logs carry the trace id.** The log line is written inside the span, so Loki stores its `trace_id` and Grafana can jump from a log line to its trace.
+- **No ids in metric labels.** Each distinct label value creates a new time series. A run id or trip id as a label would grow Prometheus without limit. Ids go on spans and logs.
+
+Names change on the way in. The counter `smoke_runs` becomes `smoke_runs_total` in Prometheus (counters get `_total`), `service.name` becomes the label `job`, and in Loki it becomes `service_name`.

@@ -75,6 +75,44 @@ services:
       retries: 20
       start_period: 15s
 
+  # Observability: started only by `make obs-up` (profile "observability"), so `make up` stays light.
+  # One container runs the OpenTelemetry collector, Prometheus, Loki, Tempo, Pyroscope and Grafana.
+  # Services send traces, metrics and logs over OTLP to lgtm:4317/4318 (localhost from the laptop).
+  # Built for development, not production; Phase 5 replaces it with the separate tools.
+  lgtm:
+    image: grafana/otel-lgtm:0.34.0
+    profiles: [observability]
+    environment:
+      # No usage reports or update checks sent to grafana.com.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      # Grafana runs most data-source plugins as separate processes. Those we never use cost
+      # ~180 MiB together (measured on day 2). Keep Prometheus, Loki, Tempo and Pyroscope.
+      GF_PLUGINS_DISABLE_PLUGINS: >-
+        grafana-llm-app,grafana-advisor-app,mssql,mysql,grafana-postgresql-datasource,
+        influxdb,opentsdb,elasticsearch,jaeger,zipkin,stackdriver
+      # Plugins are downloaded once into the volume; don't update them behind our back.
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
+    ports:
+      # Grafana lets anyone in as Admin without a login: keep it on 127.0.0.1.
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
+    volumes:
+      # Grafana, Prometheus, Loki, Tempo and Pyroscope all keep their data under /data.
+      - lgtm-data:/data
+    # ~300 MiB idle with the plugins above disabled; the rest is room for stored data.
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      # Six servers start one after another; on a laptop that is swapping this takes a while.
+      start_period: 120s
+
 volumes:
   pgdata:
   redpanda-data:
+  lgtm-data:
