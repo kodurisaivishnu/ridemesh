@@ -16,4 +16,5 @@ File names use a three-digit day number so they sort in order: `day-001-2026-10-
 
 | Day | Date | Phase | Focus | Status |
 | --- | --- | --- | --- | --- |
-| [001](day-001-2026-10-11.md) | 2026-10-11 | 0 Foundations | Tools, repo layout, core infra in Compose, templates | In progress |
+| [001](day-001-2026-10-11.md) | 2026-10-11 | 0 Foundations | Tools, repo layout, core infra in Compose, templates | Done; templates, ADR-0001 and token revoke moved to 002 |
+| [002](day-002-2026-10-12.md) | 2026-10-12 | 0 Foundations | Day 1 carry-over, observability stack (traces, metrics, logs in Grafana) | In progress |
