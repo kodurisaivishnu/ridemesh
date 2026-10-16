@@ -1,0 +1,20 @@
+[project]
+name = "hello-fastapi"
+version = "0.1.0"
+description = "Phase 0 hello service: FastAPI behind Traefik, traced with OpenTelemetry. Throwaway."
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.143.2",
+    "uvicorn>=0.54.0",
+    # Zero-code telemetry: `opentelemetry-instrument` starts the SDK (distro), loads every
+    # installed instrumentation, and OTEL_* env vars configure it. Listed here instead of
+    # installed by `opentelemetry-bootstrap`, so uv.lock pins their versions.
+    "opentelemetry-distro>=0.66b1",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-instrumentation-fastapi>=0.66b1",
+    "opentelemetry-instrumentation-logging>=0.66b1",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"

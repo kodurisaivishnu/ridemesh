@@ -5,7 +5,11 @@ requires-python = ">=3.13"
 dependencies = []
 
 [dependency-groups]
+# Every service is listed here too, so `uv sync` installs them (editable) into the root .venv
+# and pytest and mypy can import them. Services' own images install only their own packages.
 dev = [
+    "hello-fastapi",
+    "httpx2>=2.13.1",  # FastAPI's TestClient (Starlette 1.8 deprecated httpx for it)
     "mypy>=2.4.0",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
     "opentelemetry-sdk>=1.45.1",
@@ -18,9 +22,14 @@ dev = [
 [tool.uv.workspace]
 members = ["services/*"]
 
+[tool.uv.sources]
+hello-fastapi = { workspace = true }
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+# Where our own packages live, so import sorting puts them in the first-party group.
+src = [".", "platform", "services/*/src"]
 
 [tool.ruff.lint]
 select = [
@@ -43,4 +52,7 @@ strict = true
 warn_unreachable = true
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-markers"
+# importlib: several services have tests/test_hello.py; the default import mode rejects
+# two test files with the same name.
+addopts = "-ra --strict-markers --import-mode=importlib"
+testpaths = ["services"]

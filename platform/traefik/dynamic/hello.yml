@@ -1,0 +1,25 @@
+# Routes to the Phase 0 hello services. Traefik reloads this file on save.
+# Flow: router (matches the request) -> middlewares (change it) -> service (where it goes).
+
+http:
+  routers:
+    hello-fastapi:
+      entryPoints: [web]
+      # Trailing slash: PathPrefix compares strings, not path segments, so `/fastapi` would
+      # also send /fastapiX/hello to this service.
+      rule: PathPrefix(`/fastapi/`)
+      middlewares: [strip-fastapi]
+      service: hello-fastapi
+
+  middlewares:
+    # The service doesn't know about /fastapi: /fastapi/hello reaches it as /hello.
+    strip-fastapi:
+      stripPrefix:
+        prefixes: [/fastapi]
+
+  services:
+    hello-fastapi:
+      loadBalancer:
+        servers:
+          # The Compose service name; it resolves only on the Compose network.
+          - url: http://hello-fastapi:8000

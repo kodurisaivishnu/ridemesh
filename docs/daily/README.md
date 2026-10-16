@@ -18,4 +18,4 @@ File names use a three-digit day number so they sort in order: `day-001-2026-10-
 | --- | --- | --- | --- | --- |
 | [001](day-001-2026-10-11.md) | 2026-10-11 | 0 Foundations | Tools, repo layout, core infra in Compose, templates | Done; templates, ADR-0001 and token revoke moved to 002 |
 | [002](day-002-2026-10-12.md) | 2026-10-12 | 0 Foundations | Day 1 carry-over, observability stack (traces, metrics, logs in Grafana), ADR-0001 to 0003 | Done; token revoke moved to 003 |
-| [003](day-003-2026-10-13.md) | 2026-10-13 | 0 Foundations | Traefik and the FastAPI hello service, one trace through both | In progress |
+| [003](day-003-2026-10-13.md) | 2026-10-13 (worked 10-15) | 0 Foundations | Traefik and the FastAPI hello service, one trace through both; ADR-0004 | Done; token revoke and push still open |

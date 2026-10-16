@@ -112,6 +112,63 @@ services:
       # Six servers start one after another; on a laptop that is swapping this takes a while.
       start_period: 120s
 
+  # Gateway: started by `make hello-up` (profile "hello"). The only way in to the services,
+  # which publish no ports. Routes are in traefik/dynamic/; tracing goes to lgtm.
+  traefik:
+    image: traefik:v3.7.13
+    profiles: [hello]
+    # Not root: ports above 1024 need no privileges, and there is no Docker socket to read.
+    user: "65534:65534"
+    ports:
+      - "127.0.0.1:${TRAEFIK_PORT:-8080}:8080"
+      # Dashboard and API, no login: keep it on 127.0.0.1.
+      - "127.0.0.1:${TRAEFIK_DASHBOARD_PORT:-8081}:8081"
+    volumes:
+      # A directory, not single files: editors save by replacing a file, and a single-file
+      # bind mount keeps showing the old one, so watch would never see the change.
+      - ./traefik:/etc/traefik:ro
+    # ~24 MiB process memory idle (day 3).
+    mem_limit: 128m
+    healthcheck:
+      # Calls /ping, using the same config file as Traefik itself.
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # Phase 0 hello service (profile "hello"). Throwaway; Phase 1 services start from what it teaches.
+  hello-fastapi:
+    build:
+      context: ..
+      dockerfile: services/hello-fastapi/Dockerfile
+    image: ridemesh/hello-fastapi:dev
+    profiles: [hello]
+    # Zero-code telemetry: these variables configure `opentelemetry-instrument` (see the Dockerfile).
+    environment:
+      OTEL_SERVICE_NAME: hello-fastapi
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+      # The distro defaults to gRPC; only the HTTP exporter is installed (ADR-0002: no grpcio).
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      # Root logger at INFO, each line printed with its trace id; a copy goes to Loki.
+      OTEL_PYTHON_LOG_CORRELATION: "true"
+      # The healthcheck runs every 10 s; keep it out of Tempo.
+      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: healthz
+    # No ports: reachable only on the Compose network, through Traefik.
+    # ~47 MiB process memory idle (day 3).
+    mem_limit: 128m
+    healthcheck:
+      # The image has no curl; Python is already there.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
 volumes:
   pgdata:
   redpanda-data:

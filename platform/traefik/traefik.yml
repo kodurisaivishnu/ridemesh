@@ -1,0 +1,48 @@
+# Traefik static configuration: where Traefik listens, where it finds routes, where traces go.
+# Read once at start-up; after a change, restart Traefik (make hello-up).
+# Routes are in dynamic/ and reload on save, without a restart.
+
+global:
+  # Nothing phones home, as with Grafana.
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  # Requests to the services. Compose publishes it on 127.0.0.1 only.
+  web:
+    address: ":8080"
+    http:
+      # Drop headers whose name aliases another one (X_Auth_User for X-Auth-User). WSGI servers
+      # (Django, Flask) read both as HTTP_X_AUTH_USER, so a client could spoof a header we set.
+      aliasHeadersStrategy: delete
+  # Dashboard, API and /ping. Also published on 127.0.0.1 only.
+  traefik:
+    address: ":8081"
+
+providers:
+  # Routes from YAML files, not from Docker container labels: the Docker provider needs
+  # /var/run/docker.sock, which gives root on the laptop even when mounted read-only.
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# The dashboard has no login: acceptable only because its port is bound to 127.0.0.1.
+api:
+  dashboard: true
+  insecure: true
+
+# GET /ping on the traefik entrypoint; `traefik healthcheck` calls it.
+ping: {}
+
+tracing:
+  serviceName: traefik
+  sampleRate: 1.0  # every request; fine for local development
+  otlp:
+    http:
+      endpoint: http://lgtm:4318/v1/traces
+
+log:
+  level: INFO
+
+# One line per request on stdout (make logs s=traefik).
+accessLog: {}

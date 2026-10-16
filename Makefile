@@ -5,12 +5,13 @@
 export DOCKER_CONTEXT := default
 
 COMPOSE := docker compose --env-file .env -f platform/compose.yaml
-# Also sees services behind a profile (observability). Used by every target except `up`,
+# Also sees services behind a profile (observability, hello). Used by every target except `up`,
 # so `make up` starts only the core stack while `down`, `ps` and `stats` cover everything.
-COMPOSE_ALL := $(COMPOSE) --profile observability
+COMPOSE_ALL := $(COMPOSE) --profile observability --profile hello
 
 .DEFAULT_GOAL := help
-.PHONY: help up down ps logs psql redis-cli rpk stats nuke obs-up obs-down otel-smoke
+.PHONY: help up down ps logs psql redis-cli rpk stats nuke obs-up obs-down otel-smoke \
+	hello-up hello-down trace-check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -59,3 +60,15 @@ obs-down: ## Stop the observability stack (data is kept)
 
 otel-smoke: ## Send a test span, metric and log line to the observability stack
 	uv run python platform/otel_smoke.py
+
+# Not the core stack: the hello services need only observability. --build rebuilds the
+# images when their code changed (seconds, thanks to the layer cache).
+hello-up: .env ## Build and start Traefik and the hello services, with observability; waits until healthy
+	$(COMPOSE_ALL) up -d --wait --build lgtm traefik hello-fastapi
+	@echo "Try: curl localhost:$$(grep -E '^TRAEFIK_PORT=' .env | cut -d= -f2 | grep . || echo 8080)/fastapi/hello"
+
+hello-down: ## Stop Traefik and the hello services (observability keeps running)
+	$(COMPOSE_ALL) down traefik hello-fastapi
+
+trace-check: ## Request /fastapi/hello through Traefik; fails unless Tempo shows both services in one trace
+	uv run python platform/trace_check.py $(path)

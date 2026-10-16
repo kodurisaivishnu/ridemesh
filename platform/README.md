@@ -6,6 +6,9 @@ Postgres, Redis and Redpanda for local development, plus an optional observabili
 make up          # start Postgres, Redis, Redpanda; wait until healthy (creates .env on first run)
 make obs-up      # also start observability; Grafana on http://localhost:3000
 make otel-smoke  # send a test trace, metric and log line; fails if Grafana can't find them
+make hello-up    # build and start Traefik and the hello services (and observability)
+make trace-check # request through Traefik; fails unless Tempo shows one trace across both
+make hello-down  # stop Traefik and the hello services
 make ps          # status and health
 make psql db=trips
 make rpk args="topic list"
@@ -23,6 +26,9 @@ make nuke        # stop everything and delete all data
 | Schema Registry | built into Redpanda | `localhost:18081` | `redpanda:8081` |
 | Grafana | `grafana/otel-lgtm:0.34.0` | `http://localhost:3000` | `lgtm:3000` |
 | OTLP (gRPC / HTTP) | same container | `localhost:4317` / `localhost:4318` | `lgtm:4317` / `lgtm:4318` |
+| Traefik (gateway) | `traefik:v3.7.13` | `http://localhost:8080` | `traefik:8080` |
+| Traefik dashboard | same container | `http://localhost:8081` | |
+| hello-fastapi | built from `services/hello-fastapi` | through Traefik only: `localhost:8080/fastapi/…` | `hello-fastapi:8000` |
 
 ## Design decisions and why
 
@@ -128,3 +134,65 @@ The image lets anyone in as Admin without a password. That is acceptable only be
 - **No ids in metric labels.** Each distinct label value creates a new time series. A run id or trip id as a label would grow Prometheus without limit. Ids go on spans and logs.
 
 Names change on the way in. The counter `smoke_runs` becomes `smoke_runs_total` in Prometheus (counters get `_total`), `service.name` becomes the label `job`, and in Loki it becomes `service_name`.
+
+## Gateway (Traefik)
+
+Decision and alternatives: [ADR-0004](../docs/adr/0004-service-skeleton-and-gateway.md).
+
+### One way in
+
+Traefik is the only container the services can be reached through. The services publish no ports: `curl localhost:8000` from the laptop is refused. Traefik listens on `127.0.0.1:8080`, picks a route by path, and forwards the request on the Compose network.
+
+```
+curl localhost:8080/fastapi/hello
+  -> Traefik, entrypoint "web" (:8080)
+     -> router hello-fastapi       rule PathPrefix(`/fastapi/`)
+     -> middleware strip-fastapi   /fastapi/hello becomes /hello
+     -> service hello-fastapi      http://hello-fastapi:8000
+```
+
+### Two kinds of configuration
+
+| File | Holds | When it changes |
+| --- | --- | --- |
+| [traefik/traefik.yml](traefik/traefik.yml) (static) | entrypoints (ports), providers, tracing, dashboard, ping | restart Traefik (`make hello-up` after `make hello-down`) |
+| [traefik/dynamic/*.yml](traefik/dynamic/) (dynamic) | routers, middlewares, services | reloaded on save, no restart |
+
+The whole `traefik/` directory is mounted, not single files. Editors save by writing a new file and renaming it over the old one, and a single-file bind mount keeps showing the old file, so the file watcher would never see the change.
+
+`PathPrefix` compares strings, not path segments: `PathPrefix(`/fastapi`)` also matched `/fastapiX/hello`. Rules end in `/` for that reason.
+
+### How one trace crosses two services
+
+1. Traefik starts a server span for the request and a client span (`ReverseProxy`) for the call to the service.
+2. It adds a W3C `traceparent` header to the forwarded request: `00-<trace id>-<client span id>-01`.
+3. The service's OpenTelemetry instrumentation reads that header and makes its own server span a child of Traefik's client span, instead of starting a new trace.
+
+Both send their spans to `lgtm:4318` on their own, and Tempo puts them together by trace id:
+
+```
+traefik        GET            SERVER   7.4 ms
+  traefik      ReverseProxy   CLIENT   6.9 ms
+    hello-fastapi  GET /hello SERVER   2.0 ms
+```
+
+Traefik also continues a trace that arrives with a `traceparent`. `make trace-check` ([trace_check.py](trace_check.py)) uses that: it makes its own trace id, sends the request with it, then asks Tempo for exactly that trace until the service's server span appears as a child of a Traefik span. An unknown route (404), a stopped service (502) and a trace without the parent link all fail. A public edge should not trust a client's trace context. See ADR-0004.
+
+### Security
+
+- Ports on `127.0.0.1` only, like everything else. The dashboard and API (`:8081`) have no login.
+- No Docker socket: routes come from files, not container labels.
+- Runs as uid 65534 (nobody), not root. Ports above 1024 need no privileges.
+- `aliasHeadersStrategy: delete` on `web`: drops headers whose name aliases another one (`X_Auth_User` for `X-Auth-User`). WSGI servers (Django, Flask) read both as `HTTP_X_AUTH_USER`, so a client could spoof a header the gateway sets.
+- Version checks and anonymous usage stats are off.
+
+### Numbers (day 3)
+
+| What | Value |
+| --- | --- |
+| Idle memory: Traefik / hello-fastapi (process memory) | 24 MiB / 47 MiB |
+| Latency, 100 requests, direct / through Traefik (p50) | 2.8–3.0 ms / 3.5–4.5 ms |
+| Latency, same (p95) | 4.0–4.6 ms / 6.3–6.7 ms |
+| `make hello-up` to healthy | 6.3 s |
+
+Latency was measured from a throwaway container on the Compose network, so both paths have the same client.

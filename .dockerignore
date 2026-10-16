@@ -1,0 +1,12 @@
+# Image builds use the repo root as context (uv.lock lives here). Allowlist: send nothing
+# except what the Dockerfiles copy, so .env, .git, .venv and caches never reach Docker.
+*
+!pyproject.toml
+!uv.lock
+!services/
+
+# Local leftovers inside services/
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.venv
